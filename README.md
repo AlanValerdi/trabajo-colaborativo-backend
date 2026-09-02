@@ -24,7 +24,8 @@ El archivo `.env` define la URL de conexión a MySQL y las credenciales.
 ### 4. Construir y levantar los contenedores
 
 ```bash
-docker compose up --build -d
+docker compose build
+docker compose up
 ```
 
 Esto hará lo siguiente:
