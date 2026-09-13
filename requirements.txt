@@ -1,5 +1,6 @@
 alembic==1.16.4
 agent-detector==1.1.0
+bcrypt==4.0.1
 cryptography==45.0.6
 annotated-doc==0.0.5
 annotated-types==0.8.0
@@ -28,6 +29,7 @@ pydantic-settings==2.15.0
 pydantic_core==2.46.4
 Pygments==2.21.0
 python-dotenv==1.2.3
+python-jose[cryptography]==3.3.0
 python-multipart==0.0.32
 PyYAML==6.0.3
 pymysql==1.1.1

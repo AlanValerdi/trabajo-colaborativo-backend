@@ -1,12 +1,12 @@
 from fastapi import FastAPI
 
-from app.routers import user as user_router
+from app.urls import register_routers
 
 app = FastAPI(title="servicio-trabajo-colaborativo")
 
-app.include_router(user_router.router)
+register_routers(app)
 
 
-@app.get("/health")
+@app.get("/health", tags=["Health"])
 def health():
     return {"status": "ok"}
