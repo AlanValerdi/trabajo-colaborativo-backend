@@ -7,6 +7,16 @@ from pydantic.alias_generators import to_camel
 from app.models.report import ReportPriorityEnum, ReportStatusEnum
 
 
+class ReportUpdate(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    title: str
+    description: str
+    campus_label: str
+    space_label: str
+    image_url: Optional[str] = None
+
+
 class ReportCreate(BaseModel):
     """
     Entrada minima para poder crear datos de prueba y validar la consulta (HU-4)

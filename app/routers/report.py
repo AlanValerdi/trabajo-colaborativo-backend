@@ -7,7 +7,7 @@ from app.core.config import settings
 from app.db.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.user import User
-from app.schemas.report import ReportCreate, ReportRead
+from app.schemas.report import ReportCreate, ReportRead, ReportUpdate
 from app.schemas.upload import ImageUploadResponse
 from app.services import report as report_service
 from app.services import upload as upload_service
@@ -81,3 +81,30 @@ def get_report(
             detail="No existe un reporte con ese folio",
         )
     return report
+
+
+@router.patch(
+    "/{folio}",
+    response_model=ReportRead,
+    summary="Actualizar reporte en estado Creado",
+)
+def update_report(
+    folio: str,
+    report_in: ReportUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return report_service.update_report(db, folio, current_user.id, report_in)
+
+
+@router.delete(
+    "/{folio}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Eliminar reporte en estado Creado",
+)
+def delete_report(
+    folio: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    report_service.delete_report(db, folio, current_user.id)

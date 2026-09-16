@@ -1,11 +1,13 @@
 import secrets
+from datetime import datetime, timezone
 
+from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from sqlmodel import select
 
-from app.models.report import Report
+from app.models.report import Report, ReportStatusEnum
 from app.models.user import User
-from app.schemas.report import ReportAuthor, ReportCreate, ReportRead
+from app.schemas.report import ReportAuthor, ReportCreate, ReportRead, ReportUpdate
 
 
 def _generate_folio() -> str:
@@ -84,3 +86,49 @@ def get_report(db: Session, folio: str) -> ReportRead | None:
         return None
     author = db.get(User, report.author_id)
     return serialize_report(report, author)
+
+
+def _get_report_for_mutation(db: Session, folio: str, author_id: int) -> Report:
+    report = db.scalar(select(Report).where(Report.folio == folio))
+    if report is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No existe un reporte con ese folio",
+        )
+    if report.author_id != author_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permiso para modificar este reporte",
+        )
+    if report.status != ReportStatusEnum.CREADO:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Solo se pueden modificar reportes en estado Creado",
+        )
+    return report
+
+
+def update_report(
+    db: Session,
+    folio: str,
+    author_id: int,
+    report_in: ReportUpdate,
+) -> ReportRead:
+    report = _get_report_for_mutation(db, folio, author_id)
+    report.title = report_in.title
+    report.description = report_in.description
+    report.campus_label = report_in.campus_label
+    report.space_label = report_in.space_label
+    report.image_url = report_in.image_url
+    report.updated_at = datetime.now(timezone.utc)
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+    author = db.get(User, author_id)
+    return serialize_report(report, author)
+
+
+def delete_report(db: Session, folio: str, author_id: int) -> None:
+    report = _get_report_for_mutation(db, folio, author_id)
+    db.delete(report)
+    db.commit()
