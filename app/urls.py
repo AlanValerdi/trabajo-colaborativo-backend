@@ -2,8 +2,7 @@
 
 from app.routers import auth as auth_router
 from app.routers import user as user_router
-# Agrega nuevos modulos aqui:
-# from app.routers import report as report_router
+from app.routers import report as report_router
 
 
 def register_routers(app: FastAPI) -> None:
@@ -25,8 +24,8 @@ def register_routers(app: FastAPI) -> None:
         tags=["Users"],
     )
 
-    # app.include_router(
-    #     report_router.router,
-    #     prefix="/reports",
-    #     tags=["Reports"],
-    # )
+    app.include_router(
+        report_router.router,
+        prefix="/reports",
+        tags=["Reports"],
+    )

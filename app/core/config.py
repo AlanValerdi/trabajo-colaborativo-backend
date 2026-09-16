@@ -14,5 +14,9 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
+    # Uploads
+    PUBLIC_BASE_URL: str = "http://localhost:8000"
+    UPLOAD_DIR: str = "uploads"
+
 
 settings = Settings()
