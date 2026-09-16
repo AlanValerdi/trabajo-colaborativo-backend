@@ -1,11 +1,12 @@
 ﻿from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
+from sqlmodel import select
 
 from app.core.security import decode_token
 from app.db.database import get_db
-from app.models.user import RoleEnum, User
+from app.models.role import RoleEnum
+from app.models.user import User
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
@@ -35,7 +36,9 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    user = db.get(User, int(user_id))
+    user = db.scalar(
+        select(User).options(selectinload(User.user_roles)).where(User.id == int(user_id))
+    )
     if not user or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -49,10 +52,10 @@ def require_roles(*roles: RoleEnum):
     """
     CAPA 3 de seguridad: factory que genera un Depends que valida el rol del usuario.
     Uso: dependencies=[Depends(require_roles(RoleEnum.ADMINISTRADOR))]
-    Lanza 403 si el rol no esta permitido.
+    Lanza 403 si ninguno de los roles del usuario esta permitido.
     """
     def guard(current_user: User = Depends(get_current_user)) -> User:
-        if current_user.role not in roles:
+        if not current_user.has_any_role(*roles):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Permiso denegado. Roles permitidos: {[r.value for r in roles]}",

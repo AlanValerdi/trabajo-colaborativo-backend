@@ -1,16 +1,16 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from app.models.user import RoleEnum
+from app.models.role import RoleEnum
 
 
 class UserCreate(BaseModel):
     name: str
     email: EmailStr
     password: str
-    role: RoleEnum = RoleEnum.REPORTANTE
+    roles: list[RoleEnum] = Field(default_factory=lambda: [RoleEnum.REPORTANTE])
 
 
 class UserRead(BaseModel):
@@ -19,11 +19,11 @@ class UserRead(BaseModel):
     id: int
     name: str
     email: str
-    role: RoleEnum
+    roles: list[RoleEnum]
     is_active: bool
     created_at: datetime
 
 
 class UserUpdate(BaseModel):
-    role: Optional[RoleEnum] = None
+    roles: Optional[list[RoleEnum]] = None
     is_active: Optional[bool] = None

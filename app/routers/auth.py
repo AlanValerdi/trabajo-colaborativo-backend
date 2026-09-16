@@ -13,6 +13,7 @@ from app.schemas.auth import (
 )
 from app.schemas.user import UserRead
 from app.services import auth as auth_service
+from app.services.user import serialize_user
 
 router = APIRouter()
 
@@ -72,4 +73,4 @@ def logout(
 )
 def me(current_user: User = Depends(get_current_user)):
     """Retorna el perfil del usuario dueno del token."""
-    return current_user
+    return serialize_user(current_user)

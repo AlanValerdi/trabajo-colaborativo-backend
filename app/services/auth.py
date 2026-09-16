@@ -1,9 +1,10 @@
-﻿from datetime import datetime, timezone
+﻿from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from sqlmodel import select
 
+from app.core.config import settings
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -12,7 +13,9 @@ from app.core.security import (
     verify_password,
 )
 from app.models.token import RefreshToken
+from app.models.role import RoleEnum
 from app.models.user import User
+from app.models.user_role import UserRole
 from app.schemas.auth import (
     AccessTokenResponse,
     LoginRequest,
@@ -20,11 +23,15 @@ from app.schemas.auth import (
     RegisterRequest,
     TokenResponse,
 )
-from app.core.config import settings
-from datetime import timedelta
+from app.schemas.user import UserRead
+from app.services.user import get_user, serialize_user
 
 
-def register_user(db: Session, data: RegisterRequest) -> User:
+def _token_roles(user: User) -> list[str]:
+    return [role.value for role in user.roles]
+
+
+def register_user(db: Session, data: RegisterRequest) -> UserRead:
     """Crea un nuevo usuario. Lanza 400 si el email ya existe."""
     existing = db.scalars(select(User).where(User.email == data.email)).first()
     if existing:
@@ -38,14 +45,19 @@ def register_user(db: Session, data: RegisterRequest) -> User:
         password_hash=hash_password(data.password),
     )
     db.add(user)
+    db.flush()
+    db.add(UserRole(user_id=user.id, role=RoleEnum.REPORTANTE))
     db.commit()
-    db.refresh(user)
-    return user
+    loaded = get_user(db, user.id)
+    assert loaded is not None
+    return serialize_user(loaded)
 
 
 def authenticate_user(db: Session, email: str, password: str) -> User:
     """Busca el usuario por email y verifica la contrasena. Lanza 401 si falla."""
-    user = db.scalars(select(User).where(User.email == email)).first()
+    user = db.scalars(
+        select(User).options(selectinload(User.user_roles)).where(User.email == email)
+    ).first()
     if not user or not verify_password(password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -64,10 +76,9 @@ def login(db: Session, data: LoginRequest) -> TokenResponse:
     """Autentica al usuario y retorna access_token + refresh_token."""
     user = authenticate_user(db, data.email, data.password)
 
-    access_token = create_access_token({"sub": str(user.id), "role": user.role})
+    access_token = create_access_token({"sub": str(user.id), "roles": _token_roles(user)})
     refresh_token_str = create_refresh_token({"sub": str(user.id)})
 
-    # Guardar refresh token hasheado en DB
     expires_at = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     db_token = RefreshToken(
         user_id=user.id,
@@ -106,14 +117,14 @@ def refresh_access_token(db: Session, data: RefreshRequest) -> AccessTokenRespon
             detail="Refresh token invalido o expirado",
         )
 
-    user = db.get(User, int(payload["sub"]))
+    user = get_user(db, int(payload["sub"]))
     if not user or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Usuario no encontrado o desactivado",
         )
 
-    new_access_token = create_access_token({"sub": str(user.id), "role": user.role})
+    new_access_token = create_access_token({"sub": str(user.id), "roles": _token_roles(user)})
     return AccessTokenResponse(access_token=new_access_token)
 
 

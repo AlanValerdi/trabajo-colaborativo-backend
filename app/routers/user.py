@@ -3,7 +3,8 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.dependencies.auth import get_current_user, require_roles
-from app.models.user import RoleEnum, User
+from app.models.role import RoleEnum
+from app.models.user import User
 from app.schemas.user import UserCreate, UserRead, UserUpdate
 from app.services import user as user_service
 
@@ -41,9 +42,8 @@ def get_user(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Permitido si es el propio usuario, coordinador o administrador
     allowed_roles = {RoleEnum.ADMINISTRADOR, RoleEnum.COORDINADOR}
-    if current_user.id != user_id and current_user.role not in allowed_roles:
+    if current_user.id != user_id and not current_user.has_any_role(*allowed_roles):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permiso para ver este usuario",
@@ -54,16 +54,21 @@ def get_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Usuario no encontrado",
         )
-    return user
+    return user_service.serialize_user(user)
 
 
 @router.patch(
     "/{user_id}/role",
     response_model=UserRead,
-    summary="Cambiar rol de un usuario",
+    summary="Asignar roles a un usuario",
     dependencies=[Depends(require_roles(RoleEnum.ADMINISTRADOR))],
 )
 def change_role(user_id: int, user_in: UserUpdate, db: Session = Depends(get_db)):
+    if user_in.roles is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Debes enviar al menos un rol en el campo roles",
+        )
     user = user_service.update_user(db, user_id, user_in)
     if user is None:
         raise HTTPException(

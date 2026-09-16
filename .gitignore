@@ -28,6 +28,9 @@ build/
 *.egg-info/
 .eggs/
 
+# Imagenes
+/uploads/reports/*
+
 # Logs
 *.log
 logs/
