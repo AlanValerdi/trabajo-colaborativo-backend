@@ -5,6 +5,9 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from sqlmodel import select
 
+from app.models.campus import Campus
+from app.models.faculty import Faculty
+from app.models.location import Location
 from app.models.report import Report, ReportStatusEnum
 from app.models.user import User
 from app.schemas.report import ReportAuthor, ReportCreate, ReportRead, ReportUpdate
@@ -20,6 +23,36 @@ def _author_for(user: User | None, author_id: int) -> ReportAuthor:
     return ReportAuthor(id=user.id, name=user.name)
 
 
+def _resolve_hierarchy(
+    db: Session,
+    campus_id: int,
+    faculty_id: int,
+    location_id: int,
+) -> tuple[Campus, Faculty, Location]:
+    campus = db.get(Campus, campus_id)
+    if campus is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Campus no encontrado",
+        )
+
+    faculty = db.get(Faculty, faculty_id)
+    if faculty is None or faculty.campus_id != campus_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La facultad no pertenece al campus seleccionado",
+        )
+
+    location = db.get(Location, location_id)
+    if location is None or location.faculty_id != faculty_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La ubicación no pertenece a la facultad seleccionada",
+        )
+
+    return campus, faculty, location
+
+
 def serialize_report(report: Report, user: User | None) -> ReportRead:
     return ReportRead(
         id=report.id,
@@ -27,7 +60,11 @@ def serialize_report(report: Report, user: User | None) -> ReportRead:
         title=report.title,
         description=report.description,
         campus_label=report.campus_label,
+        faculty_label=report.faculty_label,
         space_label=report.space_label,
+        campus_id=report.campus_id,
+        faculty_id=report.faculty_id,
+        location_id=report.location_id,
         status=report.status,
         image_url=report.image_url,
         author_id=report.author_id,
@@ -51,6 +88,13 @@ def serialize_reports(db: Session, reports: list[Report]) -> list[ReportRead]:
 
 
 def create_report(db: Session, author_id: int, report_in: ReportCreate) -> ReportRead:
+    campus, faculty, location = _resolve_hierarchy(
+        db,
+        report_in.campus_id,
+        report_in.faculty_id,
+        report_in.location_id,
+    )
+
     for _ in range(10):
         folio = _generate_folio()
         existing = db.scalar(select(Report).where(Report.folio == folio))
@@ -63,8 +107,12 @@ def create_report(db: Session, author_id: int, report_in: ReportCreate) -> Repor
         folio=folio,
         title=report_in.title,
         description=report_in.description,
-        campus_label=report_in.campus_label,
-        space_label=report_in.space_label,
+        campus_label=campus.name,
+        faculty_label=faculty.name,
+        space_label=location.name,
+        campus_id=campus.id,
+        faculty_id=faculty.id,
+        location_id=location.id,
         image_url=report_in.image_url,
         author_id=author_id,
     )
@@ -115,10 +163,21 @@ def update_report(
     report_in: ReportUpdate,
 ) -> ReportRead:
     report = _get_report_for_mutation(db, folio, author_id)
+    campus, faculty, location = _resolve_hierarchy(
+        db,
+        report_in.campus_id,
+        report_in.faculty_id,
+        report_in.location_id,
+    )
+
     report.title = report_in.title
     report.description = report_in.description
-    report.campus_label = report_in.campus_label
-    report.space_label = report_in.space_label
+    report.campus_label = campus.name
+    report.faculty_label = faculty.name
+    report.space_label = location.name
+    report.campus_id = campus.id
+    report.faculty_id = faculty.id
+    report.location_id = location.id
     report.image_url = report_in.image_url
     report.updated_at = datetime.now(timezone.utc)
     db.add(report)

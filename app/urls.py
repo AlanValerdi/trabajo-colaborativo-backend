@@ -1,6 +1,7 @@
 ﻿from fastapi import FastAPI
 
 from app.routers import auth as auth_router
+from app.routers import catalog as catalog_router
 from app.routers import user as user_router
 from app.routers import report as report_router
 
@@ -28,4 +29,22 @@ def register_routers(app: FastAPI) -> None:
         report_router.router,
         prefix="/reports",
         tags=["Reports"],
+    )
+
+    app.include_router(
+        catalog_router.campus_router,
+        prefix="/campuses",
+        tags=["Campuses"],
+    )
+
+    app.include_router(
+        catalog_router.faculty_router,
+        prefix="/faculties",
+        tags=["Faculties"],
+    )
+
+    app.include_router(
+        catalog_router.location_router,
+        prefix="/locations",
+        tags=["Locations"],
     )

@@ -9,6 +9,9 @@ from app.models.role import RoleEnum  # noqa: F401
 from app.models.user import User  # noqa: F401
 from app.models.user_role import UserRole  # noqa: F401
 from app.models.report import Report  # noqa: F401
+from app.models.campus import Campus  # noqa: F401
+from app.models.faculty import Faculty  # noqa: F401
+from app.models.location import Location  # noqa: F401
 
 config = context.config
 

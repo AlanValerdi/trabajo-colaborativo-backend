@@ -12,25 +12,20 @@ class ReportUpdate(BaseModel):
 
     title: str
     description: str
-    campus_label: str
-    space_label: str
+    campus_id: int
+    faculty_id: int
+    location_id: int
     image_url: Optional[str] = None
 
 
 class ReportCreate(BaseModel):
-    """
-    Entrada minima para poder crear datos de prueba y validar la consulta (HU-4)
-    de punta a punta. El formulario definitivo de alta (HU-05/06) es responsabilidad
-    de Equipo 1; cuando conecten el catalogo de Campus/Space (HU-03) esto deberia
-    migrar a campusId/spaceId reales en vez de texto libre.
-    """
-
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     title: str
     description: str
-    campus_label: str
-    space_label: str
+    campus_id: int
+    faculty_id: int
+    location_id: int
     image_url: Optional[str] = None
 
 
@@ -49,7 +44,11 @@ class ReportRead(BaseModel):
     title: str
     description: str
     campus_label: str
+    faculty_label: str
     space_label: str
+    campus_id: Optional[int]
+    faculty_id: Optional[int]
+    location_id: Optional[int]
     status: ReportStatusEnum
     image_url: Optional[str]
     author_id: int

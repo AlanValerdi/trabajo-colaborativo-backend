@@ -1,8 +1,6 @@
-from __future__ import annotations
-
 from datetime import datetime, timezone
-from typing import Optional
 from enum import Enum
+from typing import Optional
 
 from sqlalchemy import Column
 from sqlalchemy import Enum as SAEnum
@@ -25,19 +23,17 @@ class Report(SQLModel, table=True):
     __tablename__ = "reports"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-
-    # Folio visible al usuario (formato reporte-{rand}, HU-4).
     folio: str = Field(nullable=False, unique=True, index=True, max_length=32)
-
     title: str = Field(nullable=False, max_length=255)
     description: str = Field(nullable=False)
 
-    # NOTA: Equipo 1 (HU-03) todavia no entrega el catalogo de Campus/Space.
-    # Mientras tanto se guardan como texto libre para no bloquear HU-4.
-    # Cuando exista el catalogo, migrar campus_label/space_label a FKs reales
-    # (campus_id -> campuses.id, space_id -> spaces.id).
     campus_label: str = Field(nullable=False, max_length=255)
+    faculty_label: str = Field(default="", nullable=False, max_length=255)
     space_label: str = Field(nullable=False, max_length=255)
+
+    campus_id: Optional[int] = Field(default=None, foreign_key="campuses.id", index=True)
+    faculty_id: Optional[int] = Field(default=None, foreign_key="faculties.id", index=True)
+    location_id: Optional[int] = Field(default=None, foreign_key="locations.id", index=True)
 
     status: ReportStatusEnum = Field(
         default=ReportStatusEnum.CREADO,
