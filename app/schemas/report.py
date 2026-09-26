@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 
 from app.models.report import ReportPriorityEnum, ReportStatusEnum
+from app.models.specialty import IncidentCategoryEnum
 
 
 class ReportUpdate(BaseModel):
@@ -50,6 +51,10 @@ class ReportRead(BaseModel):
     faculty_id: Optional[int]
     location_id: Optional[int]
     status: ReportStatusEnum
+    category: Optional[IncidentCategoryEnum]
+    specialty_id: Optional[int]
+    assignee_id: Optional[int]
+    assigned_at: Optional[datetime]
     image_url: Optional[str]
     author_id: int
     author: ReportAuthor

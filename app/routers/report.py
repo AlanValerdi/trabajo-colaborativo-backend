@@ -86,7 +86,7 @@ def get_report(
 @router.patch(
     "/{folio}",
     response_model=ReportRead,
-    summary="Actualizar reporte en estado Creado",
+    summary="Actualizar reporte en estado Reportada",
 )
 def update_report(
     folio: str,
@@ -100,7 +100,7 @@ def update_report(
 @router.delete(
     "/{folio}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Eliminar reporte en estado Creado",
+    summary="Eliminar reporte en estado Reportada",
 )
 def delete_report(
     folio: str,

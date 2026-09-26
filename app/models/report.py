@@ -6,11 +6,19 @@ from sqlalchemy import Column
 from sqlalchemy import Enum as SAEnum
 from sqlmodel import Field, SQLModel
 
+from app.models.specialty import IncidentCategoryEnum
+
 
 class ReportStatusEnum(str, Enum):
-    CREADO = "creado"
-    EN_REVISION = "en_revision"
-    RESUELTO = "resuelto"
+    REPORTADA = "reportada"
+    VALIDADA = "validada"
+    ASIGNADA = "asignada"
+    EN_PROGRESO = "en_progreso"
+    EN_VALIDACION = "en_validacion"
+    RESUELTA = "resuelta"
+    CERRADA = "cerrada"
+    BLOQUEADA = "bloqueada"
+    REABIERTA = "reabierta"
 
 
 class ReportPriorityEnum(str, Enum):
@@ -36,13 +44,32 @@ class Report(SQLModel, table=True):
     location_id: Optional[int] = Field(default=None, foreign_key="locations.id", index=True)
 
     status: ReportStatusEnum = Field(
-        default=ReportStatusEnum.CREADO,
+        default=ReportStatusEnum.REPORTADA,
         sa_column=Column(
-            SAEnum(ReportStatusEnum, values_callable=lambda obj: [e.value for e in obj]),
+            SAEnum(
+                ReportStatusEnum,
+                values_callable=lambda obj: [e.value for e in obj],
+                name="reportstatusenum",
+            ),
             nullable=False,
-            server_default="creado",
+            server_default="reportada",
         ),
     )
+
+    category: Optional[IncidentCategoryEnum] = Field(
+        default=None,
+        sa_column=Column(
+            SAEnum(
+                IncidentCategoryEnum,
+                values_callable=lambda obj: [e.value for e in obj],
+                name="incidentcategoryenum",
+            ),
+            nullable=True,
+        ),
+    )
+    specialty_id: Optional[int] = Field(default=None, foreign_key="specialties.id", index=True)
+    assignee_id: Optional[int] = Field(default=None, foreign_key="users.id", index=True)
+    assigned_at: Optional[datetime] = Field(default=None)
 
     image_url: Optional[str] = Field(default=None, max_length=1024)
     author_id: int = Field(foreign_key="users.id", nullable=False, index=True)

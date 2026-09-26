@@ -26,7 +26,15 @@ def create_user(user_in: UserCreate, db: Session = Depends(get_db)):
     "/",
     response_model=list[UserRead],
     summary="Listar usuarios",
-    dependencies=[Depends(require_roles(RoleEnum.ADMINISTRADOR, RoleEnum.COORDINADOR))],
+    dependencies=[
+        Depends(
+            require_roles(
+                RoleEnum.ADMINISTRADOR,
+                RoleEnum.COORDINADOR,
+                RoleEnum.RESPONSABLE_AREA,
+            )
+        )
+    ],
 )
 def list_users(db: Session = Depends(get_db)):
     return user_service.list_users(db)

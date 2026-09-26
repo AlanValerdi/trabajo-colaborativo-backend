@@ -12,6 +12,9 @@ from app.models.report import Report  # noqa: F401
 from app.models.campus import Campus  # noqa: F401
 from app.models.faculty import Faculty  # noqa: F401
 from app.models.location import Location  # noqa: F401
+from app.models.specialty import Specialty  # noqa: F401
+from app.models.report_assignment import ReportAssignment  # noqa: F401
+from app.models.report_status_event import ReportStatusEvent  # noqa: F401
 
 config = context.config
 

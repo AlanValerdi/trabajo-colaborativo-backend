@@ -66,6 +66,10 @@ def serialize_report(report: Report, user: User | None) -> ReportRead:
         faculty_id=report.faculty_id,
         location_id=report.location_id,
         status=report.status,
+        category=report.category,
+        specialty_id=report.specialty_id,
+        assignee_id=report.assignee_id,
+        assigned_at=report.assigned_at,
         image_url=report.image_url,
         author_id=report.author_id,
         author=_author_for(user, report.author_id),
@@ -148,10 +152,10 @@ def _get_report_for_mutation(db: Session, folio: str, author_id: int) -> Report:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permiso para modificar este reporte",
         )
-    if report.status != ReportStatusEnum.CREADO:
+    if report.status != ReportStatusEnum.REPORTADA:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Solo se pueden modificar reportes en estado Creado",
+            detail="Solo se pueden modificar reportes en estado Reportada",
         )
     return report
 
