@@ -5,6 +5,7 @@ from app.routers import catalog as catalog_router
 from app.routers import user as user_router
 from app.routers import report as report_router
 from app.routers import workflow as workflow_router
+from app.routers import comment as comment_router
 
 
 def register_routers(app: FastAPI) -> None:
@@ -60,4 +61,9 @@ def register_routers(app: FastAPI) -> None:
         catalog_router.location_router,
         prefix="/locations",
         tags=["Locations"],
+    )
+
+    app.include_router(
+        comment_router.router,
+        tags=["Comments"],
     )

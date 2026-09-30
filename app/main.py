@@ -9,10 +9,11 @@ from app.urls import register_routers
 
 app = FastAPI(title="servicio-trabajo-colaborativo")
 
-# Configuración CORS
 origins = [
-    "http://localhost:4200",  # Angular por defecto
+    "http://localhost:4200",
     "http://127.0.0.1:4200",
+    "http://localhost:4201",
+    "http://127.0.0.1:4201",
 ]
 
 app.add_middleware(
