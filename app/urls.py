@@ -6,6 +6,7 @@ from app.routers import user as user_router
 from app.routers import report as report_router
 from app.routers import workflow as workflow_router
 from app.routers import comment as comment_router
+from app.routers import technical as technical_router
 
 
 def register_routers(app: FastAPI) -> None:
@@ -37,6 +38,12 @@ def register_routers(app: FastAPI) -> None:
         workflow_router.router,
         prefix="/reports",
         tags=["Workflow"],
+    )
+
+    app.include_router(
+        technical_router.router,
+        prefix="/reports",
+        tags=["Technical"],
     )
 
     app.include_router(

@@ -15,6 +15,7 @@ from app.models.location import Location  # noqa: F401
 from app.models.specialty import Specialty  # noqa: F401
 from app.models.report_assignment import ReportAssignment  # noqa: F401
 from app.models.report_status_event import ReportStatusEvent  # noqa: F401
+from app.models.technical import Diagnosis, WorkLog  # noqa: F401
 
 config = context.config
 
