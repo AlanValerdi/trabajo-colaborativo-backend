@@ -50,3 +50,7 @@ Thumbs.db
 .mypy_cache/
 .ruff_cache/
 .dmypy.json
+
+# Archivos subidos por usuarios (evidencias, imagenes de reportes)
+uploads/*
+!uploads/.gitkeep
