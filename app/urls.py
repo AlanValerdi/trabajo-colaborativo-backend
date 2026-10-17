@@ -2,11 +2,14 @@
 
 from app.routers import auth as auth_router
 from app.routers import catalog as catalog_router
-from app.routers import user as user_router
-from app.routers import report as report_router
-from app.routers import workflow as workflow_router
+from app.routers import collaboration as collaboration_router
 from app.routers import comment as comment_router
+from app.routers import evidence as evidence_router
+from app.routers import history as history_router
+from app.routers import report as report_router
 from app.routers import technical as technical_router
+from app.routers import user as user_router
+from app.routers import workflow as workflow_router
 
 
 def register_routers(app: FastAPI) -> None:
@@ -73,4 +76,34 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(
         comment_router.router,
         tags=["Comments"],
+    )
+
+    app.include_router(
+        evidence_router.router,
+        prefix="/reports",
+        tags=["Evidences"],
+    )
+
+    app.include_router(
+        collaboration_router.router,
+        prefix="/reports",
+        tags=["Collaborations"],
+    )
+
+    app.include_router(
+        collaboration_router.collaboration_router,
+        prefix="/collaborations",
+        tags=["Collaborations"],
+    )
+
+    app.include_router(
+        history_router.router,
+        prefix="/reports",
+        tags=["History"],
+    )
+
+    app.include_router(
+        history_router.activity_router,
+        prefix="/activity",
+        tags=["Activity"],
     )
