@@ -188,16 +188,12 @@ def update_collaboration_status(
         )
 
     report = db.get(Report, collaboration.report_id)
-    is_assignee = (
-        report is not None
-        and report.assignee_id is not None
-        and report.assignee_id == actor.id
-    )
-    is_requester = collaboration.requested_by_id == actor.id
-    if not (is_assignee or is_requester or actor.has_any_role(*_MANAGE_ROLES)):
+    # Solo los roles de supervisión resuelven colaboraciones: el técnico
+    # solicita (request_collaboration), pero no las acepta/rechaza/completa.
+    if not actor.has_any_role(*_MANAGE_ROLES):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="No tienes permiso para actualizar esta colaboración",
+            detail="Solo un responsable de área, coordinador o administrador puede actualizar la colaboración",
         )
 
     allowed = _ALLOWED_TRANSITIONS.get(collaboration.status, set())

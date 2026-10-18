@@ -57,6 +57,10 @@ def report_participants(
 def recent_activity(
     limit: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    return history_service.recent_activity(db, limit)
+    """
+    Reportantes y técnicos solo ven la actividad de sus propias incidencias;
+    responsables, coordinadores, administradores y validadores ven todo.
+    """
+    return history_service.recent_activity(db, current_user, limit)
