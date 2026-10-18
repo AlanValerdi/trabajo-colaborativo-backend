@@ -10,6 +10,7 @@ from app.models.evidence import ReportEvidence
 from app.models.report import Report, ReportStatusEnum
 from app.models.report_assignment import ReportAssignment
 from app.models.report_status_event import ReportStatusEvent
+from app.models.role import RoleEnum
 from app.models.specialty import Specialty
 from app.models.technical import Diagnosis, WorkLog
 from app.models.user import User
@@ -312,8 +313,16 @@ def report_participants(db: Session, folio: str) -> list[ParticipantRead]:
 
 
 # HU-21 — Mostrar actividad reciente
-def recent_activity(db: Session, limit: int = 20) -> list[ActivityEntry]:
-    reports = list(db.scalars(select(Report)).all())
+def recent_activity(db: Session, actor: User, limit: int = 20) -> list[ActivityEntry]:
+    # Reportantes y técnicos solo ven la actividad de sus propias incidencias
+    # (autor o asignado); los roles de supervisión ven todo.
+    query = select(Report)
+    restricted = {RoleEnum.REPORTANTE, RoleEnum.TECNICO}
+    if not any(role not in restricted for role in actor.roles):
+        query = query.where(
+            (Report.author_id == actor.id) | (Report.assignee_id == actor.id)
+        )
+    reports = list(db.scalars(query).all())
     entries = _collect_entries(db, reports)
     entries.sort(key=lambda pair: pair[1].timestamp, reverse=True)
 
