@@ -1,0 +1,730 @@
+From e83e707982dafaa8bfdbb73dc156be4135c4be44 Mon Sep 17 00:00:00 2001
+From: "Claude (asistente)" <noreply@anthropic.com>
+Date: Mon, 19 Oct 2026 01:12:01 +0000
+Subject: [PATCH] fix: corrige bloqueo, permisos de colaboracion, historial y
+ feed (Sprint 3)
+
+HU-15 (bloqueo)
+- Una incidencia bloqueada desde Asignada no podia volver a Asignada: la
+  regla "Asignada solo por asignacion" se evaluaba antes que el desbloqueo.
+  Ahora el desbloqueo se evalua primero.
+
+HU-16 (colaboracion entre areas)
+- Quien solicitaba la colaboracion (tecnico asignado) tambien podia aceptarla.
+  Aceptar queda reservado a responsable de area, coordinador y administrador.
+  El solicitante puede retirar su solicitud pendiente y marcar completada.
+- Nueva columna report_collaborations.responded_by_id (migracion k1f2a3b4c5d6)
+  para registrar quien acepto, rechazo o completo.
+
+HU-18 (historial)
+- La entrada de respuesta a una colaboracion aparece con su autor real en
+  lugar de "Sistema".
+
+HU-21 (feed)
+- El feed leia todas las tablas completas y ordenaba en memoria. Ahora trae
+  solo las filas mas recientes de cada fuente (LIMIT), con el mismo resultado.
+
+Pruebas
+- Se agregan 17 pruebas con pytest y SQLite (tests/), requirements-dev.txt y
+  seccion de README.
+---
+ README.md                                     |  12 ++
+ ...k1f2a3b4c5d6_collaboration_responded_by.py |  44 +++++
+ app/models/collaboration.py                   |   4 +
+ app/schemas/collaboration.py                  |   1 +
+ app/services/collaboration.py                 |  54 ++++--
+ app/services/history.py                       | 137 +++++++++++----
+ app/services/workflow.py                      |   9 +-
+ requirements-dev.txt                          |   2 +
+ tests/__init__.py                             |   0
+ tests/conftest.py                             |  99 +++++++++++
+ tests/test_sprint3.py                         | 162 ++++++++++++++++++
+ 11 files changed, 480 insertions(+), 44 deletions(-)
+ create mode 100644 alembic/versions/k1f2a3b4c5d6_collaboration_responded_by.py
+ create mode 100644 requirements-dev.txt
+ create mode 100644 tests/__init__.py
+ create mode 100644 tests/conftest.py
+ create mode 100644 tests/test_sprint3.py
+
+diff --git a/README.md b/README.md
+index 991b10b..6ebeb1d 100644
+--- a/README.md
++++ b/README.md
+@@ -124,3 +124,15 @@ app/
+ ├── routers/user.py     # Endpoints HTTP
+ └── main.py             # Punto de entrada FastAPI
+ ```
++
++## Pruebas automáticas
++
++Las pruebas usan SQLite en un archivo temporal, por lo que no requieren MySQL ni Docker.
++
++```bash
++pip install -r requirements-dev.txt
++python -m pytest -q tests
++```
++
++Cubren el bloqueo y desbloqueo de incidencias (HU-15), la colaboración entre áreas
++con sus permisos (HU-16), el historial unificado (HU-18) y el feed de actividad (HU-21).
+diff --git a/alembic/versions/k1f2a3b4c5d6_collaboration_responded_by.py b/alembic/versions/k1f2a3b4c5d6_collaboration_responded_by.py
+new file mode 100644
+index 0000000..8066844
+--- /dev/null
++++ b/alembic/versions/k1f2a3b4c5d6_collaboration_responded_by.py
+@@ -0,0 +1,44 @@
++"""sprint 3: registrar quien responde una colaboracion entre areas
++
++Revision ID: k1f2a3b4c5d6
++Revises: j0e1f2a3b4c5
++Create Date: 2026-10-18
++
++"""
++
++from typing import Sequence, Union
++
++import sqlalchemy as sa
++from alembic import op
++from sqlalchemy import inspect
++
++revision: str = "k1f2a3b4c5d6"
++down_revision: Union[str, Sequence[str], None] = "j0e1f2a3b4c5"
++branch_labels: Union[str, Sequence[str], None] = None
++depends_on: Union[str, Sequence[str], None] = None
++
++_TABLE = "report_collaborations"
++_COLUMN = "responded_by_id"
++_INDEX = "ix_report_collaborations_responded_by_id"
++_FK = "fk_report_collaborations_responded_by_id_users"
++
++
++def _has_column() -> bool:
++    inspector = inspect(op.get_bind())
++    return any(col["name"] == _COLUMN for col in inspector.get_columns(_TABLE))
++
++
++def upgrade() -> None:
++    if _has_column():
++        return
++    op.add_column(_TABLE, sa.Column(_COLUMN, sa.Integer(), nullable=True))
++    op.create_foreign_key(_FK, _TABLE, "users", [_COLUMN], ["id"])
++    op.create_index(_INDEX, _TABLE, [_COLUMN], unique=False)
++
++
++def downgrade() -> None:
++    if not _has_column():
++        return
++    op.drop_index(_INDEX, table_name=_TABLE)
++    op.drop_constraint(_FK, _TABLE, type_="foreignkey")
++    op.drop_column(_TABLE, _COLUMN)
+diff --git a/app/models/collaboration.py b/app/models/collaboration.py
+index 0b921ae..eea6228 100644
+--- a/app/models/collaboration.py
++++ b/app/models/collaboration.py
+@@ -31,6 +31,10 @@ class ReportCollaboration(SQLModel, table=True):
+     )
+     to_specialty_id: int = Field(foreign_key="specialties.id", nullable=False)
+     reason: str = Field(nullable=False, max_length=1000)
++    # Último usuario que cambió el estado (aceptó, rechazó o completó).
++    responded_by_id: Optional[int] = Field(
++        default=None, foreign_key="users.id", index=True
++    )
+     status: CollaborationStatusEnum = Field(
+         default=CollaborationStatusEnum.SOLICITADA,
+         sa_column=Column(
+diff --git a/app/schemas/collaboration.py b/app/schemas/collaboration.py
+index 744be04..be74d0c 100644
+--- a/app/schemas/collaboration.py
++++ b/app/schemas/collaboration.py
+@@ -56,5 +56,6 @@ class CollaborationRead(BaseModel):
+     to_specialty: CollaborationSpecialty
+     reason: str
+     status: CollaborationStatusEnum
++    responded_by_id: Optional[int] = None
+     created_at: datetime
+     updated_at: datetime
+diff --git a/app/services/collaboration.py b/app/services/collaboration.py
+index 84c676d..3b16ed9 100644
+--- a/app/services/collaboration.py
++++ b/app/services/collaboration.py
+@@ -94,6 +94,7 @@ def _serialize(
+         to_specialty=_specialty_read(to_specialty),
+         reason=collaboration.reason,
+         status=collaboration.status,
++        responded_by_id=collaboration.responded_by_id,
+         created_at=collaboration.created_at,
+         updated_at=collaboration.updated_at,
+     )
+@@ -108,6 +109,46 @@ def _assert_can_request(report: Report, actor: User) -> None:
+         )
+ 
+ 
++def _assert_can_change_status(
++    collaboration: ReportCollaboration,
++    report: Report | None,
++    actor: User,
++    target: CollaborationStatusEnum,
++) -> None:
++    """
++    Reglas de permiso de HU-16:
++    - Aceptar: solo responsable de área, coordinador o administrador. Quien
++      solicita no puede aceptar su propia solicitud.
++    - Rechazar: los mismos roles; además, el solicitante puede retirar su
++      solicitud mientras siga pendiente.
++    - Completar: técnico asignado, solicitante o los roles de gestión.
++    """
++    is_manager = actor.has_any_role(*_MANAGE_ROLES)
++    is_assignee = (
++        report is not None
++        and report.assignee_id is not None
++        and report.assignee_id == actor.id
++    )
++    is_requester = collaboration.requested_by_id == actor.id
++
++    if target == CollaborationStatusEnum.ACEPTADA:
++        allowed = is_manager
++        detail = "Solo un responsable de área o coordinador puede aceptar la colaboración"
++    elif target == CollaborationStatusEnum.RECHAZADA:
++        withdraws = is_requester and collaboration.status == CollaborationStatusEnum.SOLICITADA
++        allowed = is_manager or withdraws
++        detail = "No tienes permiso para rechazar esta colaboración"
++    elif target == CollaborationStatusEnum.COMPLETADA:
++        allowed = is_manager or is_assignee or is_requester
++        detail = "No tienes permiso para completar esta colaboración"
++    else:
++        allowed = False
++        detail = "No tienes permiso para actualizar esta colaboración"
++
++    if not allowed:
++        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
++
++
+ # HU-16 — Solicitar colaboración de otra especialidad
+ def request_collaboration(
+     db: Session,
+@@ -188,17 +229,7 @@ def update_collaboration_status(
+         )
+ 
+     report = db.get(Report, collaboration.report_id)
+-    is_assignee = (
+-        report is not None
+-        and report.assignee_id is not None
+-        and report.assignee_id == actor.id
+-    )
+-    is_requester = collaboration.requested_by_id == actor.id
+-    if not (is_assignee or is_requester or actor.has_any_role(*_MANAGE_ROLES)):
+-        raise HTTPException(
+-            status_code=status.HTTP_403_FORBIDDEN,
+-            detail="No tienes permiso para actualizar esta colaboración",
+-        )
++    _assert_can_change_status(collaboration, report, actor, payload.status)
+ 
+     allowed = _ALLOWED_TRANSITIONS.get(collaboration.status, set())
+     if payload.status not in allowed:
+@@ -208,6 +239,7 @@ def update_collaboration_status(
+         )
+ 
+     collaboration.status = payload.status
++    collaboration.responded_by_id = actor.id
+     collaboration.updated_at = datetime.now(timezone.utc)
+     db.add(collaboration)
+     db.commit()
+diff --git a/app/services/history.py b/app/services/history.py
+index e59f6a8..4173918 100644
+--- a/app/services/history.py
++++ b/app/services/history.py
+@@ -1,3 +1,4 @@
++from dataclasses import dataclass, field
+ from datetime import datetime
+ 
+ from fastapi import HTTPException, status
+@@ -64,41 +65,96 @@ def _truncate(text: str, limit: int = 120) -> str:
+     return text if len(text) <= limit else f"{text[: limit - 1]}…"
+ 
+ 
++@dataclass
++class _Rows:
++    """Filas de origen de las que se arma el historial."""
++
++    status_events: list = field(default_factory=list)
++    assignments: list = field(default_factory=list)
++    comments: list = field(default_factory=list)
++    diagnoses: list = field(default_factory=list)
++    work_logs: list = field(default_factory=list)
++    evidences: list = field(default_factory=list)
++    collaborations: list = field(default_factory=list)
++
++    def report_ids(self) -> set[int]:
++        ids: set[int] = set()
++        for group in (
++            self.status_events,
++            self.assignments,
++            self.comments,
++            self.diagnoses,
++            self.work_logs,
++            self.evidences,
++            self.collaborations,
++        ):
++            ids.update(row.report_id for row in group)
++        return ids
++
++
++def _load_rows(
++    db: Session,
++    report_ids: list[int] | None,
++    limit: int | None = None,
++) -> _Rows:
++    """
++    Carga las filas de cada fuente de eventos.
++
++    - report_ids: restringe a esos reportes; None significa todos (feed global).
++    - limit: si se indica, trae solo las `limit` filas más recientes de cada
++      fuente. Basta con eso para armar los `limit` eventos más recientes del
++      feed sin leer toda la base de datos (HU-21).
++    """
++
++    def fetch(model, ts_column):
++        stmt = select(model)
++        if report_ids is not None:
++            stmt = stmt.where(model.report_id.in_(report_ids))
++        if limit is not None:
++            stmt = stmt.order_by(ts_column.desc()).limit(limit)
++        return list(db.scalars(stmt).all())
++
++    return _Rows(
++        status_events=fetch(ReportStatusEvent, ReportStatusEvent.created_at),
++        assignments=fetch(ReportAssignment, ReportAssignment.assigned_at),
++        comments=fetch(Comment, Comment.created_at),
++        diagnoses=fetch(Diagnosis, Diagnosis.created_at),
++        work_logs=fetch(WorkLog, WorkLog.created_at),
++        evidences=fetch(ReportEvidence, ReportEvidence.created_at),
++        # updated_at >= created_at: cubre tanto la solicitud como su respuesta.
++        collaborations=fetch(ReportCollaboration, ReportCollaboration.updated_at),
++    )
++
++
+ def _collect_entries(
+     db: Session,
+     reports: list[Report],
++) -> list[tuple[Report, HistoryEntry]]:
++    """Entradas de historial completas de uno o varios reportes."""
++    report_ids = [report.id for report in reports]
++    if not report_ids:
++        return []
++    return _entries_from_rows(db, reports, _load_rows(db, report_ids))
++
++
++def _entries_from_rows(
++    db: Session,
++    reports: list[Report],
++    rows: _Rows,
+ ) -> list[tuple[Report, HistoryEntry]]:
+     """
+-    Construye las entradas de historial de uno o varios reportes.
++    Construye las entradas de historial a partir de las filas cargadas.
+     Regresa pares (reporte, entrada) para que el feed global (HU-21)
+     pueda anotar folio y título.
+     """
+-    report_ids = [report.id for report in reports]
+     report_map = {report.id: report for report in reports}
+-    if not report_ids:
+-        return []
+-
+-    status_events = db.scalars(
+-        select(ReportStatusEvent).where(ReportStatusEvent.report_id.in_(report_ids))
+-    ).all()
+-    assignments = db.scalars(
+-        select(ReportAssignment).where(ReportAssignment.report_id.in_(report_ids))
+-    ).all()
+-    comments = db.scalars(
+-        select(Comment).where(Comment.report_id.in_(report_ids))
+-    ).all()
+-    diagnoses = db.scalars(
+-        select(Diagnosis).where(Diagnosis.report_id.in_(report_ids))
+-    ).all()
+-    work_logs = db.scalars(
+-        select(WorkLog).where(WorkLog.report_id.in_(report_ids))
+-    ).all()
+-    evidences = db.scalars(
+-        select(ReportEvidence).where(ReportEvidence.report_id.in_(report_ids))
+-    ).all()
+-    collaborations = db.scalars(
+-        select(ReportCollaboration).where(ReportCollaboration.report_id.in_(report_ids))
+-    ).all()
++    status_events = rows.status_events
++    assignments = rows.assignments
++    comments = rows.comments
++    diagnoses = rows.diagnoses
++    work_logs = rows.work_logs
++    evidences = rows.evidences
++    collaborations = rows.collaborations
+ 
+     user_ids: set[int] = {report.author_id for report in reports}
+     user_ids.update(event.actor_id for event in status_events)
+@@ -109,6 +165,9 @@ def _collect_entries(
+     user_ids.update(row.author_id for row in work_logs)
+     user_ids.update(row.uploader_id for row in evidences)
+     user_ids.update(row.requested_by_id for row in collaborations)
++    user_ids.update(
++        row.responded_by_id for row in collaborations if row.responded_by_id is not None
++    )
+     names = _user_names(db, user_ids)
+ 
+     specialty_ids: set[int] = set()
+@@ -233,12 +292,18 @@ def _collect_entries(
+             {"collaborationId": row.id, "status": row.status.value},
+         )
+         if row.status != CollaborationStatusEnum.SOLICITADA:
++            label = _COLLAB_LABELS[row.status]
++            summary = (
++                f"{name_of(row.responded_by_id)} marcó como {label} la colaboración con {to_name}"
++                if row.responded_by_id is not None
++                else f"La colaboración con {to_name} fue {label}"
++            )
+             add(
+                 row.report_id,
+                 "colaboracion",
+                 row.updated_at,
+-                None,
+-                f"La colaboración con {to_name} fue {_COLLAB_LABELS[row.status]}",
++                row.responded_by_id,
++                summary,
+                 {"collaborationId": row.id, "status": row.status.value},
+             )
+ 
+@@ -313,8 +378,20 @@ def report_participants(db: Session, folio: str) -> list[ParticipantRead]:
+ 
+ # HU-21 — Mostrar actividad reciente
+ def recent_activity(db: Session, limit: int = 20) -> list[ActivityEntry]:
+-    reports = list(db.scalars(select(Report)).all())
+-    entries = _collect_entries(db, reports)
++    rows = _load_rows(db, None, limit)
++
++    newest = list(
++        db.scalars(select(Report).order_by(Report.created_at.desc()).limit(limit)).all()
++    )
++    known = {report.id for report in newest}
++    missing = rows.report_ids() - known
++    extra = (
++        list(db.scalars(select(Report).where(Report.id.in_(missing))).all())
++        if missing
++        else []
++    )
++
++    entries = _entries_from_rows(db, newest + extra, rows)
+     entries.sort(key=lambda pair: pair[1].timestamp, reverse=True)
+ 
+     feed: list[ActivityEntry] = []
+diff --git a/app/services/workflow.py b/app/services/workflow.py
+index 6e8307b..633c389 100644
+--- a/app/services/workflow.py
++++ b/app/services/workflow.py
+@@ -230,9 +230,9 @@ def _assert_transition(db: Session, report: Report, actor: User, target: ReportS
+     if target == current:
+         _conflict("La incidencia ya está en ese estado")
+ 
+-    if target == ReportStatusEnum.ASIGNADA:
+-        _conflict("El estado Asignada solo se alcanza mediante la asignación de un técnico")
+-
++    # HU-15: el desbloqueo se evalúa primero. Si la incidencia se bloqueó desde
++    # Asignada, el estado previo es Asignada y debe poder restaurarse aunque ese
++    # estado no se alcance por la vía normal de asignación.
+     if current == ReportStatusEnum.BLOQUEADA:
+         blocked = _latest_block(db, report.id)
+         if blocked is None or target != blocked.from_status:
+@@ -241,6 +241,9 @@ def _assert_transition(db: Session, report: Report, actor: User, target: ReportS
+             _forbid()
+         return
+ 
++    if target == ReportStatusEnum.ASIGNADA:
++        _conflict("El estado Asignada solo se alcanza mediante la asignación de un técnico")
++
+     if target == ReportStatusEnum.VALIDADA:
+         if current != ReportStatusEnum.REPORTADA:
+             _conflict("Solo una incidencia reportada puede validarse")
+diff --git a/requirements-dev.txt b/requirements-dev.txt
+new file mode 100644
+index 0000000..a266747
+--- /dev/null
++++ b/requirements-dev.txt
+@@ -0,0 +1,2 @@
++-r requirements.txt
++pytest>=8.0
+diff --git a/tests/__init__.py b/tests/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tests/conftest.py b/tests/conftest.py
+new file mode 100644
+index 0000000..87c5eaa
+--- /dev/null
++++ b/tests/conftest.py
+@@ -0,0 +1,99 @@
++"""
++Pruebas del backend con SQLite (sin necesidad de MySQL ni Docker).
++
++Cada prueba recibe una base de datos limpia con roles, usuarios, una
++especialidad por categoría y una incidencia categorizada y asignada.
++"""
++import os
++import tempfile
++
++_DB_FILE = os.path.join(tempfile.mkdtemp(), "test.db")
++os.environ["SQLALCHEMY_DATABASE_URL"] = f"sqlite:///{_DB_FILE}"
++os.environ.setdefault("UPLOAD_DIR", tempfile.mkdtemp())
++
++import pytest  # noqa: E402
++from fastapi.testclient import TestClient  # noqa: E402
++from sqlmodel import SQLModel  # noqa: E402
++
++import app.models  # noqa: E402,F401  (registra las tablas)
++from app.core.security import create_access_token, hash_password  # noqa: E402
++from app.db.database import SessionLocal, engine  # noqa: E402
++from app.main import app  # noqa: E402
++from app.models.report import Report, ReportPriorityEnum, ReportStatusEnum  # noqa: E402
++from app.models.role import RoleEnum  # noqa: E402
++from app.models.specialty import IncidentCategoryEnum, Specialty  # noqa: E402
++from app.models.user import User  # noqa: E402
++from app.models.user_role import UserRole  # noqa: E402
++
++
++@pytest.fixture()
++def db():
++    SQLModel.metadata.drop_all(engine)
++    SQLModel.metadata.create_all(engine)
++    session = SessionLocal()
++    try:
++        yield session
++    finally:
++        session.close()
++
++
++def _make_user(db, name: str, role: RoleEnum) -> User:
++    user = User(name=name, email=f"{name.lower().replace(' ', '.')}@test.mx", password_hash=hash_password("x"))
++    db.add(user)
++    db.commit()
++    db.refresh(user)
++    db.add(UserRole(user_id=user.id, role=role))
++    db.commit()
++    return user
++
++
++@pytest.fixture()
++def world(db):
++    """Usuarios por rol, especialidades y una incidencia en estado Asignada."""
++    users = {
++        "reportante": _make_user(db, "Marta Ruiz", RoleEnum.REPORTANTE),
++        "tecnico": _make_user(db, "Carlos Nunez", RoleEnum.TECNICO),
++        "tecnico2": _make_user(db, "Otro Tecnico", RoleEnum.TECNICO),
++        "responsable": _make_user(db, "Ana Torres", RoleEnum.RESPONSABLE_AREA),
++    }
++    specialties = {}
++    for code, name, cat in [
++        ("TI", "Tecnologías de la información", IncidentCategoryEnum.TI),
++        ("ELE", "Electricidad", IncidentCategoryEnum.ELECTRICIDAD),
++    ]:
++        sp = Specialty(code=code, name=name, category=cat)
++        db.add(sp)
++        db.commit()
++        db.refresh(sp)
++        specialties[cat] = sp
++
++    report = Report(
++        folio="INC-TEST-0001",
++        title="Proyector sin imagen",
++        description="No proyecta",
++        campus_label="CU",
++        space_label="Aula 204",
++        author_id=users["reportante"].id,
++        status=ReportStatusEnum.ASIGNADA,
++        category=IncidentCategoryEnum.TI,
++        specialty_id=specialties[IncidentCategoryEnum.TI].id,
++        assignee_id=users["tecnico"].id,
++        classified=True,
++        priority=ReportPriorityEnum.ALTA,
++    )
++    db.add(report)
++    db.commit()
++    db.refresh(report)
++    return {"users": users, "specialties": specialties, "report": report}
++
++
++@pytest.fixture()
++def api(world):
++    client = TestClient(app)
++
++    def as_user(user: User) -> dict:
++        token = create_access_token({"sub": str(user.id), "type": "access"})
++        return {"Authorization": f"Bearer {token}"}
++
++    client.as_user = as_user
++    return client
+diff --git a/tests/test_sprint3.py b/tests/test_sprint3.py
+new file mode 100644
+index 0000000..4f54dd5
+--- /dev/null
++++ b/tests/test_sprint3.py
+@@ -0,0 +1,162 @@
++"""Pruebas de HU-15 (bloqueo), HU-16 (colaboración), HU-18 (historial) y HU-21 (feed)."""
++from datetime import datetime, timedelta, timezone
++
++from app.models.collaboration import ReportCollaboration
++from app.models.comment import Comment
++
++FOLIO = "INC-TEST-0001"
++
++
++def _status(api, user, status, comment=None):
++    body = {"status": status}
++    if comment is not None:
++        body["comment"] = comment
++    return api.post(f"/reports/{FOLIO}/status", json=body, headers=api.as_user(user))
++
++
++def _collab(api, user, reason="Se necesita apoyo eléctrico"):
++    return api.post(
++        f"/reports/{FOLIO}/collaborations",
++        json={"category": "electricidad", "reason": reason},
++        headers=api.as_user(user),
++    )
++
++
++# ---------------------------------------------------------------- HU-15
++def test_bloqueo_exige_comentario(api, world):
++    r = _status(api, world["users"]["tecnico"], "bloqueada")
++    assert r.status_code == 422
++
++
++def test_bloquear_y_volver_a_en_progreso(api, world):
++    tec = world["users"]["tecnico"]
++    assert _status(api, tec, "en_progreso").status_code == 200
++    assert _status(api, tec, "bloqueada", "Falta refacción").status_code == 200
++    r = _status(api, tec, "en_progreso")
++    assert r.status_code == 200 and r.json()["status"] == "en_progreso"
++
++
++def test_desbloquear_regresa_a_asignada(api, world):
++    """Bug: una incidencia bloqueada desde Asignada no podía volver a Asignada."""
++    tec = world["users"]["tecnico"]
++    assert _status(api, tec, "bloqueada", "Sin acceso al aula").status_code == 200
++    r = _status(api, tec, "asignada")
++    assert r.status_code == 200, r.json()
++    assert r.json()["status"] == "asignada"
++
++
++def test_bloqueada_solo_vuelve_al_estado_previo(api, world):
++    tec = world["users"]["tecnico"]
++    _status(api, tec, "en_progreso")
++    _status(api, tec, "bloqueada", "Falta refacción")
++    assert _status(api, tec, "resuelta").status_code == 409
++
++
++def test_reportante_no_puede_bloquear(api, world):
++    r = _status(api, world["users"]["reportante"], "bloqueada", "x")
++    assert r.status_code == 403
++
++
++# ---------------------------------------------------------------- HU-16
++def test_colaboracion_se_crea_y_lista(api, world):
++    tec = world["users"]["tecnico"]
++    r = _collab(api, tec)
++    assert r.status_code == 201
++    assert r.json()["status"] == "solicitada"
++    lst = api.get(f"/reports/{FOLIO}/collaborations", headers=api.as_user(tec))
++    assert len(lst.json()) == 1
++
++
++def test_colaboracion_misma_especialidad_rechazada(api, world):
++    tec = world["users"]["tecnico"]
++    r = api.post(f"/reports/{FOLIO}/collaborations", json={"category": "ti", "reason": "x"}, headers=api.as_user(tec))
++    assert r.status_code == 409
++
++
++def test_solicitante_no_puede_aceptar_su_propia_solicitud(api, world):
++    """Bug: el técnico que solicita la colaboración también podía aceptarla."""
++    tec = world["users"]["tecnico"]
++    cid = _collab(api, tec).json()["id"]
++    r = api.patch(f"/collaborations/{cid}", json={"status": "aceptada"}, headers=api.as_user(tec))
++    assert r.status_code == 403
++
++
++def test_responsable_acepta_y_queda_registrado_quien_respondio(api, world):
++    tec, resp = world["users"]["tecnico"], world["users"]["responsable"]
++    cid = _collab(api, tec).json()["id"]
++    r = api.patch(f"/collaborations/{cid}", json={"status": "aceptada"}, headers=api.as_user(resp))
++    assert r.status_code == 200
++    assert r.json()["respondedById"] == resp.id
++    hist = api.get(f"/reports/{FOLIO}/history", headers=api.as_user(tec)).json()
++    resp_entries = [h for h in hist if h["type"] == "colaboracion" and "aceptada" in h["summary"]]
++    assert resp_entries and resp_entries[0]["actorName"] == resp.name
++
++
++def test_solicitante_puede_retirar_su_solicitud_pendiente(api, world):
++    tec = world["users"]["tecnico"]
++    cid = _collab(api, tec).json()["id"]
++    r = api.patch(f"/collaborations/{cid}", json={"status": "rechazada"}, headers=api.as_user(tec))
++    assert r.status_code == 200
++
++
++def test_solicitante_marca_completada(api, world):
++    tec, resp = world["users"]["tecnico"], world["users"]["responsable"]
++    cid = _collab(api, tec).json()["id"]
++    api.patch(f"/collaborations/{cid}", json={"status": "aceptada"}, headers=api.as_user(resp))
++    r = api.patch(f"/collaborations/{cid}", json={"status": "completada"}, headers=api.as_user(tec))
++    assert r.status_code == 200 and r.json()["status"] == "completada"
++
++
++def test_transicion_invalida_de_colaboracion(api, world):
++    tec, resp = world["users"]["tecnico"], world["users"]["responsable"]
++    cid = _collab(api, tec).json()["id"]
++    r = api.patch(f"/collaborations/{cid}", json={"status": "completada"}, headers=api.as_user(resp))
++    assert r.status_code == 409
++
++
++# ---------------------------------------------------------------- HU-18
++def test_historial_cronologico_y_estable(api, world, db):
++    tec, resp = world["users"]["tecnico"], world["users"]["responsable"]
++    _status(api, tec, "en_progreso")
++    _status(api, tec, "bloqueada", "Falta refacción")
++    _collab(api, resp)
++    hist = api.get(f"/reports/{FOLIO}/history", headers=api.as_user(tec)).json()
++    stamps = [h["timestamp"] for h in hist]
++    assert stamps == sorted(stamps)
++    types = [h["type"] for h in hist]
++    assert types[0] == "creacion" and "estado" in types and "colaboracion" in types
++    bloqueo = [h for h in hist if "bloqueó" in h["summary"]]
++    assert bloqueo and "Falta refacción" in bloqueo[0]["summary"]
++
++
++def test_historial_folio_inexistente(api, world):
++    r = api.get("/reports/NOEXISTE/history", headers=api.as_user(world["users"]["tecnico"]))
++    assert r.status_code == 404
++
++
++# ---------------------------------------------------------------- HU-21
++def test_feed_ordenado_y_respeta_limite(api, world, db):
++    rep, tec = world["report"], world["users"]["tecnico"]
++    base = datetime.now(timezone.utc) + timedelta(minutes=1)
++    for i in range(30):
++        db.add(Comment(report_id=rep.id, user_id=tec.id, content=f"comentario {i}", created_at=base + timedelta(minutes=i)))
++    db.commit()
++    feed = api.get("/activity/recent?limit=5", headers=api.as_user(tec)).json()
++    assert len(feed) == 5
++    stamps = [f["timestamp"] for f in feed]
++    assert stamps == sorted(stamps, reverse=True)
++    assert "comentario 29" in feed[0]["summary"]
++    assert feed[0]["reportFolio"] == FOLIO
++
++
++def test_feed_incluye_eventos_de_varias_fuentes(api, world):
++    tec, resp = world["users"]["tecnico"], world["users"]["responsable"]
++    _status(api, tec, "en_progreso")
++    _collab(api, resp)
++    feed = api.get("/activity/recent?limit=20", headers=api.as_user(tec)).json()
++    assert {"estado", "colaboracion", "creacion"} <= {f["type"] for f in feed}
++
++
++def test_feed_limite_invalido(api, world):
++    r = api.get("/activity/recent?limit=0", headers=api.as_user(world["users"]["tecnico"]))
++    assert r.status_code == 422
+-- 
+2.43.0
+
