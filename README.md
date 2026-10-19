@@ -124,3 +124,15 @@ app/
 ├── routers/user.py     # Endpoints HTTP
 └── main.py             # Punto de entrada FastAPI
 ```
+
+## Pruebas automáticas
+
+Las pruebas usan SQLite en un archivo temporal, por lo que no requieren MySQL ni Docker.
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest -q tests
+```
+
+Cubren el bloqueo y desbloqueo de incidencias (HU-15), la colaboración entre áreas
+con sus permisos (HU-16), el historial unificado (HU-18) y el feed de actividad (HU-21).

@@ -230,9 +230,9 @@ def _assert_transition(db: Session, report: Report, actor: User, target: ReportS
     if target == current:
         _conflict("La incidencia ya está en ese estado")
 
-    if target == ReportStatusEnum.ASIGNADA:
-        _conflict("El estado Asignada solo se alcanza mediante la asignación de un técnico")
-
+    # HU-15: el desbloqueo se evalúa primero. Si la incidencia se bloqueó desde
+    # Asignada, el estado previo es Asignada y debe poder restaurarse aunque ese
+    # estado no se alcance por la vía normal de asignación.
     if current == ReportStatusEnum.BLOQUEADA:
         blocked = _latest_block(db, report.id)
         if blocked is None or target != blocked.from_status:
@@ -240,6 +240,9 @@ def _assert_transition(db: Session, report: Report, actor: User, target: ReportS
         if not (_is_assignee(report, actor) or actor.has_any_role(RoleEnum.RESPONSABLE_AREA)):
             _forbid()
         return
+
+    if target == ReportStatusEnum.ASIGNADA:
+        _conflict("El estado Asignada solo se alcanza mediante la asignación de un técnico")
 
     if target == ReportStatusEnum.VALIDADA:
         if current != ReportStatusEnum.REPORTADA:

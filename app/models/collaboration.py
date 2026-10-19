@@ -31,6 +31,10 @@ class ReportCollaboration(SQLModel, table=True):
     )
     to_specialty_id: int = Field(foreign_key="specialties.id", nullable=False)
     reason: str = Field(nullable=False, max_length=1000)
+    # Último usuario que cambió el estado (aceptó, rechazó o completó).
+    responded_by_id: Optional[int] = Field(
+        default=None, foreign_key="users.id", index=True
+    )
     status: CollaborationStatusEnum = Field(
         default=CollaborationStatusEnum.SOLICITADA,
         sa_column=Column(

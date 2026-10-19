@@ -56,5 +56,6 @@ class CollaborationRead(BaseModel):
     to_specialty: CollaborationSpecialty
     reason: str
     status: CollaborationStatusEnum
+    responded_by_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime

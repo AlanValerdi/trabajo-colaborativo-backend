@@ -1,3 +1,4 @@
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from fastapi import HTTPException, status
@@ -64,41 +65,96 @@ def _truncate(text: str, limit: int = 120) -> str:
     return text if len(text) <= limit else f"{text[: limit - 1]}…"
 
 
+@dataclass
+class _Rows:
+    """Filas de origen de las que se arma el historial."""
+
+    status_events: list = field(default_factory=list)
+    assignments: list = field(default_factory=list)
+    comments: list = field(default_factory=list)
+    diagnoses: list = field(default_factory=list)
+    work_logs: list = field(default_factory=list)
+    evidences: list = field(default_factory=list)
+    collaborations: list = field(default_factory=list)
+
+    def report_ids(self) -> set[int]:
+        ids: set[int] = set()
+        for group in (
+            self.status_events,
+            self.assignments,
+            self.comments,
+            self.diagnoses,
+            self.work_logs,
+            self.evidences,
+            self.collaborations,
+        ):
+            ids.update(row.report_id for row in group)
+        return ids
+
+
+def _load_rows(
+    db: Session,
+    report_ids: list[int] | None,
+    limit: int | None = None,
+) -> _Rows:
+    """
+    Carga las filas de cada fuente de eventos.
+
+    - report_ids: restringe a esos reportes; None significa todos (feed global).
+    - limit: si se indica, trae solo las `limit` filas más recientes de cada
+      fuente. Basta con eso para armar los `limit` eventos más recientes del
+      feed sin leer toda la base de datos (HU-21).
+    """
+
+    def fetch(model, ts_column):
+        stmt = select(model)
+        if report_ids is not None:
+            stmt = stmt.where(model.report_id.in_(report_ids))
+        if limit is not None:
+            stmt = stmt.order_by(ts_column.desc()).limit(limit)
+        return list(db.scalars(stmt).all())
+
+    return _Rows(
+        status_events=fetch(ReportStatusEvent, ReportStatusEvent.created_at),
+        assignments=fetch(ReportAssignment, ReportAssignment.assigned_at),
+        comments=fetch(Comment, Comment.created_at),
+        diagnoses=fetch(Diagnosis, Diagnosis.created_at),
+        work_logs=fetch(WorkLog, WorkLog.created_at),
+        evidences=fetch(ReportEvidence, ReportEvidence.created_at),
+        # updated_at >= created_at: cubre tanto la solicitud como su respuesta.
+        collaborations=fetch(ReportCollaboration, ReportCollaboration.updated_at),
+    )
+
+
 def _collect_entries(
     db: Session,
     reports: list[Report],
 ) -> list[tuple[Report, HistoryEntry]]:
+    """Entradas de historial completas de uno o varios reportes."""
+    report_ids = [report.id for report in reports]
+    if not report_ids:
+        return []
+    return _entries_from_rows(db, reports, _load_rows(db, report_ids))
+
+
+def _entries_from_rows(
+    db: Session,
+    reports: list[Report],
+    rows: _Rows,
+) -> list[tuple[Report, HistoryEntry]]:
     """
-    Construye las entradas de historial de uno o varios reportes.
+    Construye las entradas de historial a partir de las filas cargadas.
     Regresa pares (reporte, entrada) para que el feed global (HU-21)
     pueda anotar folio y título.
     """
-    report_ids = [report.id for report in reports]
     report_map = {report.id: report for report in reports}
-    if not report_ids:
-        return []
-
-    status_events = db.scalars(
-        select(ReportStatusEvent).where(ReportStatusEvent.report_id.in_(report_ids))
-    ).all()
-    assignments = db.scalars(
-        select(ReportAssignment).where(ReportAssignment.report_id.in_(report_ids))
-    ).all()
-    comments = db.scalars(
-        select(Comment).where(Comment.report_id.in_(report_ids))
-    ).all()
-    diagnoses = db.scalars(
-        select(Diagnosis).where(Diagnosis.report_id.in_(report_ids))
-    ).all()
-    work_logs = db.scalars(
-        select(WorkLog).where(WorkLog.report_id.in_(report_ids))
-    ).all()
-    evidences = db.scalars(
-        select(ReportEvidence).where(ReportEvidence.report_id.in_(report_ids))
-    ).all()
-    collaborations = db.scalars(
-        select(ReportCollaboration).where(ReportCollaboration.report_id.in_(report_ids))
-    ).all()
+    status_events = rows.status_events
+    assignments = rows.assignments
+    comments = rows.comments
+    diagnoses = rows.diagnoses
+    work_logs = rows.work_logs
+    evidences = rows.evidences
+    collaborations = rows.collaborations
 
     user_ids: set[int] = {report.author_id for report in reports}
     user_ids.update(event.actor_id for event in status_events)
@@ -109,6 +165,9 @@ def _collect_entries(
     user_ids.update(row.author_id for row in work_logs)
     user_ids.update(row.uploader_id for row in evidences)
     user_ids.update(row.requested_by_id for row in collaborations)
+    user_ids.update(
+        row.responded_by_id for row in collaborations if row.responded_by_id is not None
+    )
     names = _user_names(db, user_ids)
 
     specialty_ids: set[int] = set()
@@ -233,12 +292,18 @@ def _collect_entries(
             {"collaborationId": row.id, "status": row.status.value},
         )
         if row.status != CollaborationStatusEnum.SOLICITADA:
+            label = _COLLAB_LABELS[row.status]
+            summary = (
+                f"{name_of(row.responded_by_id)} marcó como {label} la colaboración con {to_name}"
+                if row.responded_by_id is not None
+                else f"La colaboración con {to_name} fue {label}"
+            )
             add(
                 row.report_id,
                 "colaboracion",
                 row.updated_at,
-                None,
-                f"La colaboración con {to_name} fue {_COLLAB_LABELS[row.status]}",
+                row.responded_by_id,
+                summary,
                 {"collaborationId": row.id, "status": row.status.value},
             )
 
@@ -313,8 +378,20 @@ def report_participants(db: Session, folio: str) -> list[ParticipantRead]:
 
 # HU-21 — Mostrar actividad reciente
 def recent_activity(db: Session, limit: int = 20) -> list[ActivityEntry]:
-    reports = list(db.scalars(select(Report)).all())
-    entries = _collect_entries(db, reports)
+    rows = _load_rows(db, None, limit)
+
+    newest = list(
+        db.scalars(select(Report).order_by(Report.created_at.desc()).limit(limit)).all()
+    )
+    known = {report.id for report in newest}
+    missing = rows.report_ids() - known
+    extra = (
+        list(db.scalars(select(Report).where(Report.id.in_(missing))).all())
+        if missing
+        else []
+    )
+
+    entries = _entries_from_rows(db, newest + extra, rows)
     entries.sort(key=lambda pair: pair[1].timestamp, reverse=True)
 
     feed: list[ActivityEntry] = []

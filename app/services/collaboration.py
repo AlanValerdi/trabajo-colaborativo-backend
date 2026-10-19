@@ -94,6 +94,7 @@ def _serialize(
         to_specialty=_specialty_read(to_specialty),
         reason=collaboration.reason,
         status=collaboration.status,
+        responded_by_id=collaboration.responded_by_id,
         created_at=collaboration.created_at,
         updated_at=collaboration.updated_at,
     )
@@ -106,6 +107,46 @@ def _assert_can_request(report: Report, actor: User) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Solo el técnico asignado o un responsable puede solicitar colaboración",
         )
+
+
+def _assert_can_change_status(
+    collaboration: ReportCollaboration,
+    report: Report | None,
+    actor: User,
+    target: CollaborationStatusEnum,
+) -> None:
+    """
+    Reglas de permiso de HU-16:
+    - Aceptar: solo responsable de área, coordinador o administrador. Quien
+      solicita no puede aceptar su propia solicitud.
+    - Rechazar: los mismos roles; además, el solicitante puede retirar su
+      solicitud mientras siga pendiente.
+    - Completar: técnico asignado, solicitante o los roles de gestión.
+    """
+    is_manager = actor.has_any_role(*_MANAGE_ROLES)
+    is_assignee = (
+        report is not None
+        and report.assignee_id is not None
+        and report.assignee_id == actor.id
+    )
+    is_requester = collaboration.requested_by_id == actor.id
+
+    if target == CollaborationStatusEnum.ACEPTADA:
+        allowed = is_manager
+        detail = "Solo un responsable de área o coordinador puede aceptar la colaboración"
+    elif target == CollaborationStatusEnum.RECHAZADA:
+        withdraws = is_requester and collaboration.status == CollaborationStatusEnum.SOLICITADA
+        allowed = is_manager or withdraws
+        detail = "No tienes permiso para rechazar esta colaboración"
+    elif target == CollaborationStatusEnum.COMPLETADA:
+        allowed = is_manager or is_assignee or is_requester
+        detail = "No tienes permiso para completar esta colaboración"
+    else:
+        allowed = False
+        detail = "No tienes permiso para actualizar esta colaboración"
+
+    if not allowed:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
 
 
 # HU-16 — Solicitar colaboración de otra especialidad
@@ -188,17 +229,7 @@ def update_collaboration_status(
         )
 
     report = db.get(Report, collaboration.report_id)
-    is_assignee = (
-        report is not None
-        and report.assignee_id is not None
-        and report.assignee_id == actor.id
-    )
-    is_requester = collaboration.requested_by_id == actor.id
-    if not (is_assignee or is_requester or actor.has_any_role(*_MANAGE_ROLES)):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="No tienes permiso para actualizar esta colaboración",
-        )
+    _assert_can_change_status(collaboration, report, actor, payload.status)
 
     allowed = _ALLOWED_TRANSITIONS.get(collaboration.status, set())
     if payload.status not in allowed:
@@ -208,6 +239,7 @@ def update_collaboration_status(
         )
 
     collaboration.status = payload.status
+    collaboration.responded_by_id = actor.id
     collaboration.updated_at = datetime.now(timezone.utc)
     db.add(collaboration)
     db.commit()
