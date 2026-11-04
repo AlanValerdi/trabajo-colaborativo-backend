@@ -124,3 +124,23 @@ app/
 ├── routers/user.py     # Endpoints HTTP
 └── main.py             # Punto de entrada FastAPI
 ```
+
+## Carga por área y técnico
+
+Solo los roles `coordinador` y `responsable_area` pueden consultar:
+
+- `GET /workload`: resumen y agrupaciones `byArea`, `byTechnician`, `byAreaAndTechnician`.
+- `GET /workload/reports?pendingOnly=true&limit=50&offset=0`: detalle paginado con `items` y `total`.
+
+Enviar `Authorization: Bearer <access_token>`. Ambos aceptan `specialtyId` y
+`assigneeId`; el detalle también `status` y `priority`. Los filtros se combinan
+con AND. Ejemplo: `/workload/reports?specialtyId=1&assigneeId=5&status=en_progreso`.
+Pendientes excluye resueltas y cerradas. Se cuenta la asignación actual, sin sumar
+colaboraciones ni asignaciones anteriores. Las áreas son especialidades. Los
+registros sin área o técnico tienen ID nulo; `unclassified` identifica la prioridad
+sin definir. Ambos roles ven todas las áreas. Los técnicos activos y las
+especialidades sin carga aparecen con cero; los técnicos inactivos con carga se
+conservan en el resumen.
+
+Pruebas de carga funcional (solo lectura de datos):
+`python -m unittest discover -s tests -p test_workload.py -v`.

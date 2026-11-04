@@ -286,6 +286,8 @@ def _assert_transition(db: Session, report: Report, actor: User, target: ReportS
     if target == ReportStatusEnum.REABIERTA:
         if current not in _REOPEN_SOURCES:
             _conflict("Solo se puede reabrir desde En validación, Resuelta o Cerrada")
+        if current == ReportStatusEnum.CERRADA and not actor.has_any_role(RoleEnum.VALIDADOR):
+            _forbid()
         if not (_is_author(report, actor) or actor.has_any_role(RoleEnum.VALIDADOR)):
             _forbid()
         return

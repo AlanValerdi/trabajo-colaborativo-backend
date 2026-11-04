@@ -193,5 +193,14 @@ def update_report(
 
 def delete_report(db: Session, folio: str, author_id: int) -> None:
     report = _get_report_for_mutation(db, folio, author_id)
+    from app.models.comment import Comment, CommentMention
+    from sqlmodel import SQLModel
+    from sqlalchemy import delete
+
+    comment_ids = select(Comment.id).where(Comment.report_id == report.id)
+    db.execute(delete(CommentMention).where(CommentMention.comment_id.in_(comment_ids)))
+    for table in reversed(SQLModel.metadata.sorted_tables):
+        if "report_id" in table.c:
+            db.execute(delete(table).where(table.c.report_id == report.id))
     db.delete(report)
     db.commit()

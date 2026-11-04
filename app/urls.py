@@ -1,4 +1,4 @@
-﻿from fastapi import FastAPI
+from fastapi import FastAPI
 
 from app.routers import auth as auth_router
 from app.routers import catalog as catalog_router
@@ -12,12 +12,17 @@ from app.routers import user as user_router
 from app.routers import workflow as workflow_router
 
 
+from app.routers import workload as workload_router
+
+
 def register_routers(app: FastAPI) -> None:
     """
     Archivo central de rutas.
     Todos los routers del sistema se registran aqui.
     Para agregar un nuevo modulo: importarlo y anadir su include_router.
     """
+
+    app.include_router(workload_router.router, prefix="/workload", tags=["Workload"])
 
     app.include_router(
         auth_router.router,
