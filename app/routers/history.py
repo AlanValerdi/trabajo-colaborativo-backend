@@ -2,13 +2,20 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.dependencies.auth import get_current_user
+from app.dependencies.auth import get_current_user, require_roles
+from app.models.role import RoleEnum
 from app.models.user import User
-from app.schemas.history import ActivityEntry, HistoryEntry, ParticipantRead
+from app.schemas.history import (
+    ActivityEntry,
+    HistoryEntry,
+    LocationHistoryResponse,
+    ParticipantRead,
+)
 from app.services import history as history_service
 
 router = APIRouter()
 activity_router = APIRouter()
+location_router = APIRouter()
 
 
 # HU-18 — Consultar historial
@@ -64,3 +71,29 @@ def recent_activity(
     responsables, coordinadores, administradores y validadores ven todo.
     """
     return history_service.recent_activity(db, current_user, limit)
+
+
+# HU-26 — Consultar historial de un espacio físico
+@location_router.get(
+    "/locations/{location_id}",
+    response_model=LocationHistoryResponse,
+    summary="Historial de incidencias de un espacio físico (HU-26)",
+)
+def location_history(
+    location_id: int,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(
+        require_roles(
+            RoleEnum.COORDINADOR,
+            RoleEnum.RESPONSABLE_AREA,
+            RoleEnum.ADMINISTRADOR,
+        )
+    ),
+):
+    """
+    Devuelve el total de incidencias, el resumen por categoría y la
+    línea de tiempo de los reportes registrados en el espacio físico.
+
+    Solo accesible para coordinadores, responsables de área y administradores.
+    """
+    return history_service.location_history(db, location_id)

@@ -7,6 +7,7 @@ from sqlmodel import select
 from app.models.collaboration import CollaborationStatusEnum, ReportCollaboration
 from app.models.comment import Comment
 from app.models.evidence import ReportEvidence
+from app.models.location import Location
 from app.models.report import Report, ReportStatusEnum
 from app.models.report_assignment import ReportAssignment
 from app.models.report_status_event import ReportStatusEvent
@@ -14,7 +15,14 @@ from app.models.role import RoleEnum
 from app.models.specialty import Specialty
 from app.models.technical import Diagnosis, WorkLog
 from app.models.user import User
-from app.schemas.history import ActivityEntry, HistoryEntry, ParticipantRead
+from app.schemas.history import (
+    ActivityEntry,
+    CategorySummary,
+    HistoryEntry,
+    LocationHistoryResponse,
+    LocationIncidentItem,
+    ParticipantRead,
+)
 
 _STATUS_LABELS = {
     ReportStatusEnum.REPORTADA: "Reportada",
@@ -336,3 +344,81 @@ def recent_activity(db: Session, actor: User, limit: int = 20) -> list[ActivityE
             )
         )
     return feed
+
+
+# HU-26 — Consultar historial de un espacio físico
+def location_history(db: Session, location_id: int) -> LocationHistoryResponse:
+    location = db.get(Location, location_id)
+    if location is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No existe un espacio físico con el ID proporcionado",
+        )
+
+    reports = list(
+        db.scalars(
+            select(Report)
+            .where(Report.location_id == location_id)
+            .order_by(Report.created_at.desc())
+        ).all()
+    )
+
+    report_ids = [report.id for report in reports]
+    diagnoses: dict[int, Diagnosis] = {}
+    if report_ids:
+        diagnoses = {
+            row.report_id: row
+            for row in db.scalars(
+                select(Diagnosis).where(Diagnosis.report_id.in_(report_ids))
+            ).all()
+        }
+
+    assignee_ids = {
+        report.assignee_id
+        for report in reports
+        if report.assignee_id is not None
+    }
+    tech_names = _user_names(db, assignee_ids)
+
+    timeline: list[LocationIncidentItem] = []
+    category_counts: dict[str, int] = {}
+    for report in reports:
+        category = report.category.value if report.category is not None else "otro"
+        diagnosis = diagnoses.get(report.id)
+        timeline.append(
+            LocationIncidentItem(
+                id=report.id,
+                folio=report.folio,
+                title=report.title,
+                created_at=report.created_at,
+                status=report.status.value,
+                category=category,
+                assigned_tech_name=(
+                    tech_names.get(report.assignee_id)
+                    if report.assignee_id is not None
+                    else None
+                ),
+                diagnosis_summary=(
+                    _truncate(diagnosis.root_cause)
+                    if diagnosis is not None
+                    else None
+                ),
+            )
+        )
+        category_counts[category] = category_counts.get(category, 0) + 1
+
+    categories_summary = [
+        CategorySummary(category=category, count=count)
+        for category, count in sorted(
+            category_counts.items(),
+            key=lambda item: (-item[1], item[0]),
+        )
+    ]
+
+    return LocationHistoryResponse(
+        location_id=location.id,
+        location_name=location.name,
+        total_incidents=len(reports),
+        categories_summary=categories_summary,
+        timeline=timeline,
+    )

@@ -103,6 +103,12 @@ def register_routers(app: FastAPI) -> None:
     )
 
     app.include_router(
+        history_router.location_router,
+        prefix="/history",
+        tags=["History"],
+    )
+
+    app.include_router(
         history_router.activity_router,
         prefix="/activity",
         tags=["Activity"],
