@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status, Query
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -11,6 +11,7 @@ from app.schemas.report import ReportCreate, ReportRead, ReportUpdate
 from app.schemas.upload import ImageUploadResponse
 from app.services import report as report_service
 from app.services import upload as upload_service
+
 
 router = APIRouter()
 
@@ -51,18 +52,30 @@ def create_report(
     """
     return report_service.create_report(db, current_user.id, report_in)
 
-
+#============================================================
 @router.get(
     "/",
     response_model=list[ReportRead],
-    summary="Listar incidencias reportadas (HU-4)",
+    summary="Listar incidencias reportadas (HU-4 / HU-25)",
 )
 def list_reports(
+    search: str | None = Query(default=None, description="Término de búsqueda"),
+    status: str | None = Query(default=None, description="Filtrar por estatus"),
+    campus_id: int | None = Query(default=None, alias="campusId", description="ID de campus"),
+    faculty_id: int | None = Query(default=None, alias="facultyId", description="ID de facultad"),
+    location_id: int | None = Query(default=None, alias="locationId", description="ID de ubicación"),
     db: Session = Depends(get_db),
     _current_user: User = Depends(get_current_user),
 ):
-    return report_service.list_reports(db)
-
+    return report_service.list_reports(
+        db,
+        search=search,
+        status=status,
+        campus_id=campus_id,
+        faculty_id=faculty_id,
+        location_id=location_id,
+    )
+#==================================================================
 
 @router.get(
     "/{folio}",
