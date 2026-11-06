@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import or_, select
 from sqlmodel import select
 
 from app.models.campus import Campus
@@ -126,11 +127,43 @@ def create_report(db: Session, author_id: int, report_in: ReportCreate) -> Repor
     author = db.get(User, author_id)
     return serialize_report(report, author)
 
+#===================================================================================================================
 
-def list_reports(db: Session) -> list[ReportRead]:
-    reports = list(db.scalars(select(Report).order_by(Report.id.desc())).all())
+def list_reports(
+    db: Session,
+    search: str | None = None,
+    status: str | None = None,
+    campus_id: int | None = None,
+    faculty_id: int | None = None,
+    location_id: int | None = None,
+) -> list[ReportRead]:
+    stmt = select(Report)
+
+    # Filtro de búsqueda por texto en título o descripción
+    if search:
+        search_filter = f"%{search}%"
+        stmt = stmt.where(
+            or_(
+                Report.title.ilike(search_filter),
+                Report.description.ilike(search_filter),
+            )
+        )
+
+    # Filtros de catálogos y estado
+    if status:
+        stmt = stmt.where(Report.status == status)
+    if campus_id is not None:
+        stmt = stmt.where(Report.campus_id == campus_id)
+    if faculty_id is not None:
+        stmt = stmt.where(Report.faculty_id == faculty_id)
+    if location_id is not None:
+        stmt = stmt.where(Report.location_id == location_id)
+
+    stmt = stmt.order_by(Report.id.desc())
+    reports = list(db.scalars(stmt).all())
     return serialize_reports(db, reports)
 
+#==================================================================================
 
 def get_report(db: Session, folio: str) -> ReportRead | None:
     report = db.scalar(select(Report).where(Report.folio == folio))
