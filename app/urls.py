@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from app.routers import analytics as analytics_router
 
 from app.routers import auth as auth_router
 from app.routers import catalog as catalog_router
@@ -22,6 +23,8 @@ def register_routers(app: FastAPI) -> None:
     Para agregar un nuevo modulo: importarlo y anadir su include_router.
     """
 
+    app.include_router(analytics_router.router, prefix="/analytics", tags=["Analytics"])
+    app.include_router(analytics_router.attention_router, prefix="/reports", tags=["Attention"])
     app.include_router(workload_router.router, prefix="/workload", tags=["Workload"])
 
     app.include_router(
