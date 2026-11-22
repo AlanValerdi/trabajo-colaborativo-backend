@@ -144,3 +144,58 @@ conservan en el resumen.
 
 Pruebas de carga funcional (solo lectura de datos):
 `python -m unittest discover -s tests -p test_workload.py -v`.
+
+## HU-27 a HU-30: reportes y atención
+
+Los endpoints requieren `Authorization: Bearer <access_token>`.
+
+| Endpoint | Uso | Acceso |
+|---|---|---|
+| `GET /analytics/summary` | Totales, distribución por estado/área, promedios y tamaño de muestra | Administrador, coordinador, responsable de área |
+| `GET /analytics/reports` | Detalle paginado con tiempos y calificación | Los mismos roles |
+| `GET /analytics/export` | Todos los resultados filtrados como CSV UTF-8 | Los mismos roles |
+| `GET /reports/{folio}/attention-times` | Tiempos de una incidencia | Autor, técnico asignado y roles de gestión |
+| `GET /reports/{folio}/evaluation` | Evaluación o `null` si no existe | Los mismos usuarios |
+| `POST /reports/{folio}/evaluation` | Evaluación única de una incidencia cerrada | Exclusivamente el autor |
+
+Los tres endpoints de analítica comparten los filtros `start_date`, `end_date`
+(fechas ISO `YYYY-MM-DD`), `campus_id`, `specialty_id`, `assignee_id`, `status`
+y `priority`. Se combinan con AND. Las fechas filtran la **creación** del reporte,
+incluyendo ambos días en UTC; los estados, área y técnico representan su situación
+actual, no una reconstrucción histórica. El detalle acepta además `limit` (1–200,
+por defecto 25) y `offset` (desde 0). El CSV exporta el conjunto completo filtrado,
+independientemente de la página, con comillas y saltos de línea escapados y
+neutralización de fórmulas de hoja de cálculo. Las consultas se procesan en lotes.
+
+Los tiempos son horas naturales desde la creación, incluyendo períodos bloqueados:
+
+- Primera atención: primer evento `en_progreso`.
+- Resolución: último evento `resuelta`, solo si el estado actual es resuelta o cerrada.
+- Cierre: último evento `cerrada`, solo si actualmente está cerrada.
+- Tiempo abierta: antigüedad actual para estados distintos de resuelta/cerrada.
+
+Los hitos sin historial válido se devuelven como `null` y se excluyen de los
+promedios; cada promedio incluye su tamaño de muestra. Una reapertura invalida el
+tiempo final hasta una nueva resolución. Las fechas de salida incluyen zona UTC.
+No se calculan tiempos de jornada laboral ni SLA porque no existe un calendario
+de servicio configurado.
+
+La evaluación recibe `{"rating": 5, "comment": "Buena atención"}`: entero de 1 a 5,
+comentario opcional de hasta 1000 caracteres. Se permite una sola evaluación por
+incidencia, sin edición. Se conserva si posteriormente se reabre la incidencia.
+Los intentos duplicados o sobre incidencias abiertas devuelven 409; un usuario
+distinto del autor recibe 403. La restricción única en la base de datos protege
+también frente a solicitudes concurrentes. Migración: `k1f2a3b4c5d6`.
+
+La implementación mantiene límites por responsabilidad: `routers/analytics.py`
+adapta HTTP; `services/analytics.py` genera los reportes y exportaciones;
+`services/attention.py` aplica permisos y reglas de evaluación;
+`repositories/analytics.py` concentra consultas SQL; `domain/attention.py`
+calcula tiempos sin dependencias de HTTP o persistencia; `schemas/analytics.py`
+define los contratos y `models/attention_evaluation.py` la persistencia.
+
+Pruebas aisladas con SQLite en memoria, sin modificar MySQL:
+
+```bash
+python -m unittest discover -s tests -p test_analytics.py -v
+```
