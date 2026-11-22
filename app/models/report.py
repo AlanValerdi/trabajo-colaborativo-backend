@@ -25,6 +25,7 @@ class ReportPriorityEnum(str, Enum):
     BAJA = "baja"
     MEDIA = "media"
     ALTA = "alta"
+    CRITICA = "critica"
 
 
 class Report(SQLModel, table=True):
